@@ -2,11 +2,43 @@
 #include<WinSock2.h>
 #include<WS2tcpip.h>
 #include<stdio.h>
+#include<string>
 #include<Windows.h>
 #include "FileHelper.h"
- 
+#include<iostream>
+using namespace std;
+
+char* extract(char pkt[520]);
+
+//数据包一共1500个字节
+//0-4表示序列号，5-9表示确认序列号
+//10-14是标志位，分别保留位、A（ack）、R（reset）、S（syn）、F（fin）
+//15-19是校验和，20-1499是数据
+
+
+//套接字初始化
+
+
+
+int check(char* ch)
+{
+	int sum = 0;
+	for (int i = 0; i < strlen(ch); i++)
+	{
+		sum += abs((int)ch[i]) % 2;
+	}
+	return sum;
+}
+
+
+
 int main()
 {
+	char sendData[BUFSIZ]="你好！\n";
+	char beginData[BUFSIZ]="Begin\n";
+	char overData[BUFSIZ]="Over\n";
+	char ok[BUFSIZ]="ok";
+
 	WORD wVersionRequested;
 	WSADATA wsaData;
  
@@ -33,14 +65,31 @@ int main()
 	bind(socketServer,(SOCKADDR*)&addrServ,sizeof(SOCKADDR));
 	SOCKADDR_IN addrClient;
 	int length=sizeof(SOCKADDR);
-	char recvBuf[BUFSIZ]={};
+	char recvBuf[512]={};
+	char pkt[520]={};
+	char data[512]={};
+	char sendheader[8] = { '0', '0', '0', '0', '0', '0', '0', '\0' };
+	char recvheader[8] = { '0', '0', '0', '0', '0', '0', '0', '\0' }; 
 	int rev=0;
+	int time=1;
+
+
+
+
+	cout<<"等待连接......"<<endl;
+	recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
+
+	cout<<"收到信息，等待确认......"<<endl;
+	sendto(socketServer,beginData,BUFSIZ,0,(SOCKADDR*)&addrClient, sizeof(SOCKADDR));
+
+	recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
+	if (strcmp(recvBuf,ok)==0)
+		cout<<"收到确认消息，连接已建立！"<<endl;
+
 	while (true)
 	{
 		DWORD TIME_OUT=10;
-		char sendData[BUFSIZ]="你好！\n";
-		char beginData[BUFSIZ]="Begin\n";
-		char overData[BUFSIZ]="Over\n";
+		
 		char Filename[BUFSIZ]={};
 		char ClientAddr[BUFSIZ]={};
 		char FromName[BUFSIZ]={};
@@ -51,9 +100,10 @@ int main()
 		};
 		printf("%d\n",err);
 		recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
-		if (strcmp(recvBuf,beginData)==0)
+		cout<<"第"<<time<<"次传输文件"<<endl;
+		time++;
+		if (strcmp(recvBuf,ok)==0)
 		{
- 
 			recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
 			strcpy(ClientAddr,inet_ntoa(addrClient.sin_addr));
 			strcpy(FromName,recvBuf);
@@ -65,16 +115,54 @@ int main()
  
 		}
 		int sum=0;
-		while((rev=recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length))>0)
+		while(1)
 		{
+			rev=recvfrom(socketServer,pkt,520,0,(SOCKADDR*)&addrClient,&length);
+			
+			//cout<<pkt<<"    "<<sizeof(pkt)<<endl;
+			
 			if (strcmp(overData,recvBuf)==0)
 			{
 				printf("文件%s传输成功!\n",FromName);
 				fclose(f);
 				break;
 			}
-		//	printf(recvBuf);
-			fwrite(recvBuf,1,rev,f);
+	
+			for(int i=8;i<520;i++)
+				data[i-8]=pkt[i];
+			
+
+			int che=check(data);
+			if (che == 0) {
+				sendheader[2] = '0';
+			}
+			else
+			{
+				sendheader[2] = '1';
+			}
+
+			cout<<"che:"<<sendheader[2]<<"   "<<pkt[2]<<endl;
+			cout<<"seq:"<<sendheader[1]<<"   "<<pkt[1]<<endl;
+			
+			if(sendheader[2]!=pkt[2] ||sendheader[1]!=pkt[1] )//校验和不同，或者序号不同，发送重发的请求
+			{
+				sendheader[0]=0;
+				sendto(socketServer,sendheader,8,0,(SOCKADDR*)&addrClient, sizeof(SOCKADDR));
+			}
+			
+			sendheader[0]='1';
+			cout<<"接受无误，发生确认消息"<<endl;
+
+			
+			sendto(socketServer,sendheader,8,0,(SOCKADDR*)&addrClient, sizeof(SOCKADDR));
+			
+			if(sendheader[1]=='0')
+				sendheader[1]='1';
+			else
+				sendheader[1]='0';
+			
+			//	printf(recvBuf);
+			fwrite(data,1,rev-8,f);
 			printf("%db\n",sum+=rev);
 		}
  
@@ -91,4 +179,11 @@ int main()
 	WSACleanup();
 	return 0;
  
+}
+char* extract(char pkt[520]){
+	char data[512];
+	for(int i=8;i<520;i++)
+		data[i-8]=pkt[i];
+	data[511]='\0';
+	return data;
 }
