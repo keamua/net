@@ -66,12 +66,13 @@ int main()
 	SOCKADDR_IN addrClient;
 	int length=sizeof(SOCKADDR);
 	char recvBuf[512]={};
-	char pkt[520]={};
-	char data[512]={};
+	char pkt[5008]={};
+	char data[5000]={};
 	char sendheader[8] = { '0', '0', '0', '0', '0', '0', '0', '\0' };
 	char recvheader[8] = { '0', '0', '0', '0', '0', '0', '0', '\0' }; 
 	int rev=0;
 	int time=1;
+	int nNetTimeout=1000;
 
 
 
@@ -85,7 +86,7 @@ int main()
 	recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
 	if (strcmp(recvBuf,ok)==0)
 		cout<<"收到确认消息，连接已建立！"<<endl;
-
+	
 	while (true)
 	{
 		DWORD TIME_OUT=10;
@@ -94,14 +95,22 @@ int main()
 		char ClientAddr[BUFSIZ]={};
 		char FromName[BUFSIZ]={};
 		FILE *f=NULL;
+		
 		if(err=setsockopt(socketServer,SOL_SOCKET,SO_SNDTIMEO,(char *)&TIME_OUT,sizeof(TIME_OUT)))
 		{
 			printf("失败！\n");
 		};
 		printf("%d\n",err);
+		
 		recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
 		cout<<"第"<<time<<"次传输文件"<<endl;
 		time++;
+		/*
+		if (setsockopt(socketServer, SOL_SOCKET, SO_RCVTIMEO, (char *)&nNetTimeout,sizeof(int)) < 0) 
+		{
+			printf("socket option SO_RCVTIMEO not support\n");
+			return 0;
+		}*/
 		if (strcmp(recvBuf,ok)==0)
 		{
 			recvfrom(socketServer,recvBuf,BUFSIZ,0,(SOCKADDR*)&addrClient,&length);
@@ -115,23 +124,39 @@ int main()
  
 		}
 		int sum=0;
-		while(1)
+		while((rev=recvfrom(socketServer,pkt,5008,0,(SOCKADDR*)&addrClient,&length))>=0)
 		{
-			rev=recvfrom(socketServer,pkt,520,0,(SOCKADDR*)&addrClient,&length);
+			/*
+			if(rev=recvfrom(socketServer,pkt,520,0,(SOCKADDR*)&addrClient,&length)<0)
+			{
+					if (rev == EWOULDBLOCK || rev == EAGAIN)
+					{
+						printf("recvfrom timeout\n");
+						sendto(socketServer,pkt, 520, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+						cout<<"重新发送数据包"<<endl;
+					}
+					else
+					{
+						printf("recvfrom err:%d\n", rev);
+						sendto(socketServer,pkt, 520, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+						cout<<"重新发送数据包"<<endl;
+					}
+			}
+			*/
 			
 			//cout<<pkt<<"    "<<sizeof(pkt)<<endl;
 			
-			if (strcmp(overData,recvBuf)==0)
+			if (strcmp(overData,pkt)==0)
 			{
 				printf("文件%s传输成功!\n",FromName);
 				fclose(f);
 				break;
 			}
-	
-			for(int i=8;i<520;i++)
+			
+			for(int i=8;i<5008;i++)
 				data[i-8]=pkt[i];
 			
-
+			/**/
 			int che=check(data);
 			if (che == 0) {
 				sendheader[2] = '0';
@@ -144,26 +169,29 @@ int main()
 			cout<<"che:"<<sendheader[2]<<"   "<<pkt[2]<<endl;
 			cout<<"seq:"<<sendheader[1]<<"   "<<pkt[1]<<endl;
 			
-			if(sendheader[2]!=pkt[2] ||sendheader[1]!=pkt[1] )//校验和不同，或者序号不同，发送重发的请求
+			
+			if(sendheader[2]!=pkt[2]  )//校验和不同，或者序号不同，发送重发的请求
 			{
-				sendheader[0]=0;
+				sendheader[0]='0';
 				sendto(socketServer,sendheader,8,0,(SOCKADDR*)&addrClient, sizeof(SOCKADDR));
 			}
-			
-			sendheader[0]='1';
-			cout<<"接受无误，发生确认消息"<<endl;
+			else if(sendheader[2]!=pkt[2]){
 
+
+			}
+			else{
+				sendheader[0]='1';
+				cout<<"接受无误，发生确认消息"<<endl;
+				sendto(socketServer,sendheader,8,0,(SOCKADDR*)&addrClient, sizeof(SOCKADDR));
 			
-			sendto(socketServer,sendheader,8,0,(SOCKADDR*)&addrClient, sizeof(SOCKADDR));
+				if(sendheader[1]=='0')
+					sendheader[1]='1';
+				else
+					sendheader[1]='0';
 			
-			if(sendheader[1]=='0')
-				sendheader[1]='1';
-			else
-				sendheader[1]='0';
-			
-			//	printf(recvBuf);
 			fwrite(data,1,rev-8,f);
-			printf("%db\n",sum+=rev);
+			printf("%db\n",sum+=rev-8);
+		}
 		}
  
 		if (rev<0||strcmp(overData,recvBuf)!=0)
