@@ -5,6 +5,7 @@
 #include<stdio.h>
 #include<Windows.h>
 #include<time.h>
+#include<iostream>
 
 
 #include"FileHelper.h"
@@ -32,7 +33,7 @@ int main()
 
 	WORD wVersionRequested;
 	WSADATA wsaData;
-	char sendData[BUFSIZ] = "";
+	char sendData[5000] = "";
 	char ok[BUFSIZ] = "ok";
 	char beginData[BUFSIZ] = "Begin\n";
 	char overData[BUFSIZ] = "Over\n";
@@ -68,10 +69,16 @@ int main()
 	addrServ.sin_port = htons(4999);
 
 	int length = sizeof(SOCKADDR);
-	char recvBuf[BUFSIZ] = {};
+	char recvBuf[5000] = {};
 	char sendheader[8] = { '0', '0', '0', '0', '0', '0', '0', '\0' };
 	char recvheader[8] = { '0', '0', '0', '0', '0', '0', '0', '\0' };
 	int rev = 0;
+	int nNetTimeout=1000;
+	struct timeval tv;
+	int ret;
+	tv.tv_sec = 10;
+	tv.tv_usec = 0;
+
 
 	SOCKET socketClient = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -94,8 +101,14 @@ int main()
 		sendto(socketClient, Filename, BUFSIZ, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
 		int count = 0;
 		int sum = 0;
-		while ((count = fread(sendData, 1, 512, f)) > 0)
+		if (setsockopt(socketClient, SOL_SOCKET, SO_RCVTIMEO, (char *)&nNetTimeout,sizeof(int)) < 0) 
 		{
+			printf("socket option SO_RCVTIMEO not support\n");
+			return 0;
+		}
+		while ((count = fread(sendData, 1, 5000, f)) > 0)
+		{
+			Sleep(1);
 			if (sendheader[1] == '0' ) {
 				printf("%d\n", sum += count);
 				int che=check(sendData);
@@ -107,19 +120,31 @@ int main()
 					sendheader[2] = '1';
 				}
 				//cout << sendData << endl;
-				char* pkt = make_pkt(sendheader, sendData);
+				//char* pkt = make_pkt(sendheader, sendData);
+				//cout << pkt << endl;
+				char pkt[5008];
+				for (int i = 0; i < 8; i++)
+					pkt[i] = sendheader[i];
+				for (int i = 8; i < 5008; i++)
+					pkt[i] = sendData[i-8];
 				//cout << pkt << endl;
 				
-				sendto(socketClient,pkt, 520, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
-				clock_t now = clock();
-				cout << "状态1，等待收到ACK" << endl;
 
-				recvfrom(socketClient, recvheader, 8, 0, (SOCKADDR*)&addrServ, &length);
-				
-				while (recvheader[0] == '0' || recvheader[1] == '1') {
-					sendto(socketClient, pkt, 520, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
-					recvfrom(socketClient, recvheader, 8, 0, (SOCKADDR*)&addrServ, &length);
+				sendto(socketClient, pkt, 5008, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+				cout << "状态1，等待收到ACK" << endl;
+				ret = recvfrom(socketClient, recvheader, 8, 0, (SOCKADDR*)&addrServ, &length);
+				if (ret <  0) 
+				{
+						printf("recvfrom err\n");
+						sendto(socketClient,pkt, 5008, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+						cout<<"重新发送数据包"<<endl;
+
 				}
+				
+				if (recvheader[0] == '0' ) {
+					sendto(socketClient, pkt, 5008, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+				}
+				
 				cout << "状态2，接受到ACK且序号为0的消息"<<endl;
 				sendheader[1] = '1';
 			}
@@ -136,14 +161,30 @@ int main()
 					sendheader[2] = '1';
 				}
 				//cout << sendData << endl;
-				char* pkt = make_pkt(sendheader, sendData);
-				//cout << pkt << endl;
-				sendto(socketClient, pkt, 520, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
-				cout << "状态3，等待收到ACK" << endl;
-				recvfrom(socketClient, recvheader, 8, 0, (SOCKADDR*)&addrServ, &length);
+				char pkt[5008];
 				
-				while (recvheader[0] == '0' || recvheader[1] == '0') {
-					sendto(socketClient, pkt, 520, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+				/**/
+				for (int i = 0; i < 8; i++)
+					pkt[i] = sendheader[i];
+				for (int i = 8; i < 5008; i++)
+					pkt[i] = sendData[i-8];
+				//cout << pkt << endl;
+				
+				sendto(socketClient, pkt, 5008, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+				
+				cout << "状态3，等待收到ACK" << endl;
+				ret = recvfrom(socketClient, recvheader, 8, 0, (SOCKADDR*)&addrServ, &length);
+				
+				if (ret <  0) 
+				{
+						printf("recvfrom err\n");
+						sendto(socketClient,pkt, 5008, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
+						cout<<"重新发送数据包"<<endl;
+
+				}
+				
+				if (recvheader[0] == '0') {
+					sendto(socketClient, pkt, 5008, 0, (SOCKADDR*)&addrServ, sizeof(SOCKADDR));
 					recvfrom(socketClient, recvheader, 8, 0, (SOCKADDR*)&addrServ, &length);
 				}
 				
@@ -180,5 +221,4 @@ bool isACK(char* ch)
 		return false;
 
 }
-
 
